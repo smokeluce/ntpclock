@@ -1,224 +1,78 @@
-# ntpclock
+# Background: ntpclock History & Context
 
-![Shell: Bash](https://img.shields.io/badge/shell-bash-4EAA25?style=plastic&logo=gnubash&logoColor=white)
-![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=plastic)
-![Platform: Linux](https://img.shields.io/badge/platform-linux-FCC624?style=plastic&logo=linux&logoColor=black)
-![Maintained: Yes](https://img.shields.io/badge/maintained-yes-brightgreen?style=plastic)
+## Origin
 
-A minimal Bash script that syncs the system clock from an NTP server and writes
-the result to the hardware (RTC) clock. Originally written by Paul Swonger
-(mawst) on January 19, 2003. Preserved, modernized, and re-documented in 2026.
-
----
-
-## Why Does This Still Exist?
-
-Modern Linux systems typically run `chronyd` or `ntpd` as a persistent daemon —
-meaning time is kept in sync automatically and you never need to think about it.
-
-**ntpclock still has legitimate uses when you don't want or can't run a daemon:**
-
-- **Headless/embedded systems** with no persistent NTP daemon
-- **Containers** (Docker, LXC) that inherit a bad clock from the host and need a one-shot fix
-- **VMs** that drift and need a periodic hard correction (especially after sleep/resume)
-- **Air-gapped or intermittently-connected machines** that sync on demand
-- **Cron-based environments** where a lightweight one-shot sync is preferred over a running daemon
-- **Legacy or resource-constrained hardware** where you want zero daemon overhead
-- **Learning / understanding** how `ntpdate` and `hwclock` interact at a fundamental level
-
-If you're running a modern always-on server with `chronyd` already active, you
-probably don't need this. But if you do need it — it's here.
-
----
-
-## Requirements
-
-- Linux (any modern distro)
-- Must be run as **root** or via `sudo`
-- One of the following NTP tools installed:
-  - `ntpdate` *(legacy but still widely packaged)*
-  - `chronyd` *(preferred on systemd-based distros)*
-  - `sntp` *(from the `ntp` package on some distros)*
-- `hwclock` *(part of `util-linux`, present on virtually all Linux systems)*
-
-### Installing Dependencies
-
-**Debian / Ubuntu:**
-```bash
-sudo apt install ntpdate        # legacy, simple
-# or
-sudo apt install chrony         # modern, preferred
-```
-
-**RHEL / Fedora / CentOS:**
-```bash
-sudo dnf install ntpdate
-# or
-sudo dnf install chrony
-```
-
-**Alpine:**
-```bash
-apk add ntpdate
-# or
-apk add chrony
-```
-
----
-
-## Installation
+ntpclock was written by Paul Swonger (mawst) on January 19, 2003. At the time,
+`ntpdate` was the standard tool for one-shot NTP synchronization on Linux, and
+the script's entire logic was two lines:
 
 ```bash
-# Clone the repo
-git clone https://github.com/smokeluce/ntpclock.git
-cd ntpclock
-
-# Install the script
-sudo install -m 755 bin/ntpclock /usr/local/bin/ntpclock
+ntpdate ntp0.mcs.anl.gov
+hwclock --systohc
 ```
+
+The original hardcoded server (`ntp0.mcs.anl.gov`) belongs to Argonne National
+Laboratory's Math and Computer Science division, which has operated public NTP
+servers for decades. It still responds today, but `pool.ntp.org` is the modern
+community standard and is used as the default in this modernized version.
 
 ---
 
-## Usage
+## The `ntpdate` Deprecation Story
 
-```bash
-sudo ntpclock [NTP_SERVER]
-```
+`ntpdate` has been officially deprecated since around 2011 by the NTP Project,
+who recommended replacing it with `ntpd -q` (run ntpd in one-shot mode). The
+reasoning was that `ntpdate` used a simplified protocol implementation and could
+make large, abrupt clock jumps rather than slewing gradually.
 
-`NTP_SERVER` is optional and defaults to `pool.ntp.org`.
+Despite this, `ntpdate` continues to be packaged by Debian, Ubuntu, Alpine, and
+others because:
 
-### Examples
+1. It's simple and does exactly one thing
+2. Many init scripts and legacy tools depend on it
+3. For machines not running a persistent daemon, abrupt correction is often fine
 
-```bash
-# Sync using the default NTP pool
-sudo ntpclock
-
-# Sync using a specific server
-sudo ntpclock time.cloudflare.com
-
-# Sync using a local NTP server
-sudo ntpclock 192.168.1.1
-```
-
-### Example Output
-
-```
-[ntpclock] Using sync tool: ntpdate
-[ntpclock] NTP server: pool.ntp.org
- 8 Mar 22:14:05 ntpdate[12345]: adjust time server 162.159.200.1 offset +0.003842 sec
-[ntpclock] System clock synced from NTP.
-[ntpclock] Hardware clock updated from system clock.
-[ntpclock] Done. Current time: Fri Mar  6 22:14:05 CST 2026
-```
+In practice, `ntpdate` is not going away anytime soon.
 
 ---
 
-## Scheduling with Cron
+## Modern Alternatives
 
-### Run hourly (as root)
+### chronyd (recommended for most use cases)
+`chronyd` is the default NTP daemon on RHEL 8+, Fedora, and many modern distros.
+It supports a one-shot query mode: `chronyd -q "server pool.ntp.org iburst"`.
+This is what ntpclock uses when `ntpdate` is not found.
 
-Edit root's crontab with `sudo crontab -e` and add:
+### systemd-timesyncd
+Built into systemd, `systemd-timesyncd` runs as a lightweight background service
+and handles NTP sync automatically. On systems where it's active, you may not
+need ntpclock at all. Check with: `timedatectl status`.
 
-```cron
-# Sync system clock from NTP every hour, log output
-0 * * * * /usr/local/bin/ntpclock >> /var/log/ntpclock.log 2>&1
-```
-
-### Run at boot + every 6 hours
-
-```cron
-@reboot     /usr/local/bin/ntpclock >> /var/log/ntpclock.log 2>&1
-0 */6 * * * /usr/local/bin/ntpclock >> /var/log/ntpclock.log 2>&1
-```
-
-### Run daily at 3am
-
-```cron
-0 3 * * * /usr/local/bin/ntpclock >> /var/log/ntpclock.log 2>&1
-```
-
-> **Note:** The cron daemon itself does not run as root by default. Always use
-> `sudo crontab -e` (not your user's crontab) to schedule this, or prefix with
-> `sudo` if your cron config supports it.
-
-### Logrotate (optional)
-
-To prevent `/var/log/ntpclock.log` from growing unbounded, add a logrotate config:
-
-```
-/var/log/ntpclock.log {
-    weekly
-    rotate 4
-    compress
-    missingok
-    notifempty
-}
-```
-
-Save to `/etc/logrotate.d/ntpclock`.
+### When ntpclock is still the right tool
+- You want a simple, auditable, cron-scheduled sync with no daemon
+- You're on a container or VM that doesn't have systemd-timesyncd configured
+- You want a quick one-liner that logs to a file and exits
+- You're on a resource-constrained or embedded system
 
 ---
 
-## Scheduling with systemd (modern alternative to cron)
+## The `hwclock --systohc` Step
 
-See [`systemd/`](systemd/) for drop-in unit files that run ntpclock as a
-systemd timer — a cleaner, more observable alternative to cron on modern distros.
+The two-step process (NTP → system clock, then system clock → hardware clock)
+is intentional:
 
-```bash
-sudo cp systemd/ntpclock.service /etc/systemd/system/
-sudo cp systemd/ntpclock.timer   /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now ntpclock.timer
-sudo systemctl list-timers ntpclock.timer
-```
+1. **NTP sets the system clock** (kernel time, kept in RAM)
+2. **`hwclock --systohc` writes it to the RTC** (battery-backed hardware chip)
 
----
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| `0`  | Success |
-| `1`  | Not running as root |
-| `2`  | No supported NTP tool found |
-| `3`  | NTP sync failed |
-| `4`  | Hardware clock sync failed |
+Without step 2, the hardware clock drifts back to its old value after reboot.
+This is especially important for machines that don't run a persistent NTP daemon —
+if the hardware clock is wrong, the system clock will be wrong at next boot.
 
 ---
 
-## Project Structure
+## Pool.ntp.org
 
-```
-ntpclock/
-├── bin/
-│   └── ntpclock          # The script
-├── systemd/
-│   ├── ntpclock.service  # systemd one-shot service unit
-│   └── ntpclock.timer    # systemd timer unit (replaces cron)
-├── cron-examples/
-│   └── ntpclock.cron     # Ready-to-paste crontab examples
-├── docs/
-│   └── BACKGROUND.md     # History, ntpdate deprecation, alternatives
-├── LICENSE               # MIT
-└── README.md
-```
-
----
-
-## Background & History
-
-`ntpdate` was deprecated in favor of `ntpd -q` and later `chronyd -q`, but it
-remains in active use and is still packaged by most major distributions. This
-script originally hardcoded `ntp0.mcs.anl.gov` (Argonne National Laboratory's
-NTP server) — replaced here with `pool.ntp.org`, which load-balances across
-thousands of volunteer servers worldwide and is the modern community standard.
-
-See [`docs/BACKGROUND.md`](docs/BACKGROUND.md) for more context.
-
----
-
-## License
-
-MIT License. See [LICENSE](LICENSE).
-
-Copyright © 2003–2026 Paul Swonger (mawst) — https://github.com/smokeluce/ntpclock
+`pool.ntp.org` is a large virtual cluster of timeservers maintained by volunteers.
+DNS round-robin load-balances queries across thousands of servers globally.
+Subpools exist for regions: `us.pool.ntp.org`, `europe.pool.ntp.org`, etc.
+Using the global `pool.ntp.org` is fine for most purposes.

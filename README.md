@@ -1,5 +1,10 @@
 # ntpclock
 
+![Shell: Bash](https://img.shields.io/badge/shell-bash-4EAA25?style=plastic&logo=gnubash&logoColor=white)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=plastic)
+![Platform: Linux](https://img.shields.io/badge/platform-linux-FCC624?style=plastic&logo=linux&logoColor=black)
+![Maintained: Yes](https://img.shields.io/badge/maintained-yes-brightgreen?style=plastic)
+
 A minimal Bash script that syncs the system clock from an NTP server and writes
 the result to the hardware (RTC) clock. Originally written by Paul Swonger
 (mawst) on January 19, 2003. Preserved, modernized, and re-documented in 2026.
