@@ -1,0 +1,16 @@
+# ntpclock cron examples
+# Install with: sudo crontab -e
+# Then paste whichever line fits your use case.
+
+# --- Sync every hour ---
+0 * * * * /usr/local/bin/ntpclock >> /var/log/ntpclock.log 2>&1
+
+# --- Sync every 6 hours ---
+0 */6 * * * /usr/local/bin/ntpclock >> /var/log/ntpclock.log 2>&1
+
+# --- Sync daily at 3:00am ---
+0 3 * * * /usr/local/bin/ntpclock >> /var/log/ntpclock.log 2>&1
+
+# --- Sync at boot AND every hour ---
+@reboot     /usr/local/bin/ntpclock >> /var/log/ntpclock.log 2>&1
+0 * * * *   /usr/local/bin/ntpclock >> /var/log/ntpclock.log 2>&1

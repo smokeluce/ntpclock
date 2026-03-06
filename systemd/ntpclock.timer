@@ -1,0 +1,10 @@
+[Unit]
+Description=Run ntpclock hourly to keep hardware clock in sync
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1h
+Unit=ntpclock.service
+
+[Install]
+WantedBy=timers.target

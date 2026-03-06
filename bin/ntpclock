@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# =============================================================================
+# ntpclock — Sync system clock from NTP, then write to hardware clock
+# =============================================================================
+# Original: NTPClock by Paul Swonger (mawst), January 19, 2003
+# Modernized: 2026
+#
+# Copyright © 2003–2026 Paul Swonger (mawst)
+# License: MIT (see LICENSE)
+# =============================================================================
+#
+# DESCRIPTION
+#   Queries an NTP server to set the system clock, then syncs the result
+#   to the hardware (RTC) clock. Intended for machines that do not run
+#   ntpd/chronyd as a persistent daemon — e.g. headless servers, embedded
+#   systems, containers, or VMs where a one-shot sync is preferred.
+#
+# REQUIREMENTS
+#   - Must be run as root (or via sudo)
+#   - One of the following must be installed:
+#       • ntpdate   (legacy, still widely packaged)
+#       • chronyd   (preferred on modern systemd distros)
+#       • sntp      (from ntp package on some distros)
+#   - hwclock (part of util-linux, present on virtually all Linux systems)
+#
+# USAGE
+#   sudo ntpclock [NTP_SERVER]
+#
+#   NTP_SERVER defaults to pool.ntp.org if not supplied.
+#
+# EXAMPLES
+#   sudo ntpclock
+#   sudo ntpclock time.cloudflare.com
+#   sudo ntpclock pool.ntp.org
+#
+# CRON EXAMPLE (run every hour as root)
+#   0 * * * * /usr/local/bin/ntpclock >> /var/log/ntpclock.log 2>&1
+#
+# EXIT CODES
+#   0  Success
+#   1  Not running as root
+#   2  No supported NTP sync tool found
+#   3  NTP sync failed
+#   4  Hardware clock sync failed
+#
+# =============================================================================
+
+set -euo pipefail
+
+# --- Configuration -----------------------------------------------------------
+
+NTP_SERVER="${1:-pool.ntp.org}"
+LOGPREFIX="[ntpclock]"
+
+# --- Helpers -----------------------------------------------------------------
+
+log()  { echo "${LOGPREFIX} $*"; }
+err()  { echo "${LOGPREFIX} ERROR: $*" >&2; }
+die()  { err "$1"; exit "${2:-1}"; }
+
+# --- Root check --------------------------------------------------------------
+
+if [[ "${EUID}" -ne 0 ]]; then
+    die "This script must be run as root (try: sudo ntpclock)" 1
+fi
+
+# --- Detect available NTP sync tool ------------------------------------------
+
+sync_tool=""
+
+if command -v ntpdate &>/dev/null; then
+    sync_tool="ntpdate"
+elif command -v chronyd &>/dev/null; then
+    sync_tool="chronyd"
+elif command -v sntp &>/dev/null; then
+    sync_tool="sntp"
+else
+    die "No supported NTP tool found. Install ntpdate, chrony, or ntp." 2
+fi
+
+log "Using sync tool: ${sync_tool}"
+log "NTP server: ${NTP_SERVER}"
+
+# --- Sync system clock from NTP ----------------------------------------------
+
+case "${sync_tool}" in
+    ntpdate)
+        ntpdate "${NTP_SERVER}" || die "ntpdate failed to sync from ${NTP_SERVER}" 3
+        ;;
+    chronyd)
+        chronyd -q "server ${NTP_SERVER} iburst" || die "chronyd one-shot sync failed" 3
+        ;;
+    sntp)
+        sntp -S "${NTP_SERVER}" || die "sntp failed to sync from ${NTP_SERVER}" 3
+        ;;
+esac
+
+log "System clock synced from NTP."
+
+# --- Write system clock to hardware (RTC) clock ------------------------------
+
+hwclock --systohc || die "hwclock --systohc failed" 4
+
+log "Hardware clock updated from system clock."
+log "Done. Current time: $(date)"
